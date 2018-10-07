@@ -306,7 +306,7 @@ def main():
 
     # GPU ID
     os.environ["CUDA_VISIBLE_DEVICES"] = '0'
-    batch_size = 10
+    batch_size = 5
     workers = 0
 
     # epoch数量，分stage进行，跑完一个stage后降低学习率进入下一个stage
@@ -370,13 +370,13 @@ def main():
     # 训练集图片变换
     train_data = TrainDataset(train_data_list,
                               transform=transforms.Compose([
-                                  transforms.Resize((400, 400)),
+                                  transforms.Resize((600, 600)),
                                   transforms.ColorJitter(0.15, 0.15, 0.15, 0.075),
                                   transforms.RandomHorizontalFlip(),
                                   transforms.RandomGrayscale(),
                                   # transforms.RandomRotation(20),
                                   FixedRotation([0, 90, 180, 270]),
-                                  transforms.RandomCrop(384),
+                                  transforms.RandomCrop(584),
                                   transforms.ToTensor(),
                                   normalize,
                               ]))
@@ -384,8 +384,8 @@ def main():
     # 验证集图片变换
     val_data = ValDataset(val_data_list,
                           transform=transforms.Compose([
-                              transforms.Resize((400, 400)),
-                              transforms.CenterCrop(384),
+                              transforms.Resize((600,600)),
+                              transforms.CenterCrop(584),
                               transforms.ToTensor(),
                               normalize,
                           ]))
@@ -393,8 +393,8 @@ def main():
     # 测试集图片变换
     test_data = TestDataset(test_data_list,
                             transform=transforms.Compose([
-                                transforms.Resize((400, 400)),
-                                transforms.CenterCrop(384),
+                                transforms.Resize((600, 600)),
+                                transforms.CenterCrop(584),
                                 transforms.ToTensor(),
                                 normalize,
                             ]))
