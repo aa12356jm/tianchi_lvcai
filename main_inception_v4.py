@@ -139,30 +139,34 @@ def main():
         model.train()
 
         end = time.time()
+        # 从训练集迭代器中获取训练数据
         for i, (images, target) in enumerate(train_loader):
-            # measure data loading
+            # 评估图片读取耗时
             data_time.update(time.time() - end)
+            # 将图片和标签转化为tensor
             image_var = torch.tensor(images).cuda(async=True)
             label = torch.tensor(target).cuda(async=True)
 
-            # compute y_pred
+            # 将图片输入网络，前传，生成预测值
             y_pred = model(image_var)
+            # 计算loss
             loss = criterion(y_pred, label)
-
-            # measure accuracy and record loss
-            prec, PRED_COUNT = accuracy(y_pred.data, target, topk=(1, 1))
             losses.update(loss.item(), images.size(0))
+
+            # 计算top1正确率
+            prec, PRED_COUNT = accuracy(y_pred.data, target, topk=(1, 1))
             acc.update(prec, PRED_COUNT)
 
-            # compute gradient and do SGD step
+            # 对梯度进行反向传播，使用随机梯度下降更新网络权重
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # measure elapsed time
+            # 评估训练耗时
             batch_time.update(time.time() - end)
             end = time.time()
 
+            # 打印耗时与结果
             if i % print_freq == 0:
                 print('Epoch: [{0}][{1}/{2}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
@@ -185,7 +189,7 @@ def main():
             image_var = torch.tensor(images).cuda(async=True)
             target = torch.tensor(labels).cuda(async=True)
 
-            # compute y_pred
+            # 图片前传。验证和测试时不需要更新网络权重，所以使用torch.no_grad()，表示不计算梯度
             with torch.no_grad():
                 y_pred = model(image_var)
                 loss = criterion(y_pred, target)
@@ -217,15 +221,16 @@ def main():
         model.eval()
         for i, (images, filepath) in enumerate(tqdm(test_loader)):
             # bs, ncrops, c, h, w = images.size()
-            filepath = [i.split('/')[-1] for i in filepath]
+            filepath = [os.path.basename(i) for i in filepath]
             image_var = torch.tensor(images, requires_grad=False)  # for pytorch 0.4
 
             with torch.no_grad():
                 y_pred = model(image_var)
-
-                # get the index of the max log-probability
+                # 使用softmax函数将图片预测结果转换成类别概率
                 smax = nn.Softmax(1)
                 smax_out = smax(y_pred)
+                
+            # 保存图片名称与预测概率
             csv_map['filename'].extend(filepath)
             for output in smax_out:
                 prob = ';'.join([str(i) for i in output.data.tolist()])
@@ -244,7 +249,7 @@ def main():
             else:
                 sub_label.append('defect%d' % pred_label)
 
-        # 生成结果文件，保存在result文件夹中
+        # 生成结果文件，保存在result文件夹中，可用于直接提交
         submission = pd.DataFrame({'filename': sub_filename, 'label': sub_label})
         submission.to_csv('./result/%s/submission.csv' % file_name, header=None, index=False)
         return
@@ -299,18 +304,18 @@ def main():
         else:
             final_acc = PRED_CORRECT_COUNT / PRED_COUNT
         return final_acc * 100, PRED_COUNT
-
-
-
+    
     # 程序主体
 
-    # GPU ID
+    # 设定GPU ID
     os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+    # 小数据集上，batch size不易过大。如出现out of memory，应调小batch size
     batch_size = 5
+    # 进程数量，最好不要超过电脑最大进程数。windows下报错可以改为workers=0
     workers = 0
 
     # epoch数量，分stage进行，跑完一个stage后降低学习率进入下一个stage
-    stage_epochs = [20, 10, 10]
+    stage_epochs = [20, 10, 10]  
     # 初始学习率
     lr = 1e-4
     # 学习率衰减系数 (new_lr = lr / lr_decay)
@@ -325,7 +330,8 @@ def main():
     best_precision = 0
     lowest_loss = 100
 
-    # 训练及验证时的打印频率，用于观察loss和acc的实时变化
+    # 设定打印频率，即多少step打印一次，用于观察loss和acc的实时变化
+    # 打印结果中，括号前面为实时loss和acc，括号内部为epoch内平均loss和acc
     print_freq = 1
     # 验证集比例
     val_ratio = 0.12
@@ -333,15 +339,16 @@ def main():
     evaluate = False
     # 是否从断点继续跑
     resume = False
-    # 创建模型
+    # 创建inception_v4模型
     model = model_v4.v4(num_classes=12)
     model = torch.nn.DataParallel(model).cuda()
 
     # optionally resume from a checkpoint
     if resume:
-        if os.path.isfile(resume):
-            print("=> loading checkpoint '{}'".format(resume))
-            checkpoint = torch.load(resume)
+        checkpoint_path = './model/%s/checkpoint.pth.tar' % file_name
+        if os.path.isfile(checkpoint_path):
+            print("=> loading checkpoint '{}'".format(checkpoint_path))
+            checkpoint = torch.load(checkpoint_path)
             start_epoch = checkpoint['epoch'] + 1
             best_precision = checkpoint['best_precision']
             lowest_loss = checkpoint['lowest_loss']
@@ -355,7 +362,7 @@ def main():
                 model.load_state_dict(torch.load('./model/%s/model_best.pth.tar' % file_name)['state_dict'])
             print("=> loaded checkpoint (epoch {})".format(checkpoint['epoch']))
         else:
-            print("=> no checkpoint found at '{}'".format(resume))
+            print("=> no checkpoint found at '{}'".format(checkpoint_path))
 
     # 读取训练图片列表
     all_data = pd.read_csv('data/label.csv')
@@ -367,16 +374,16 @@ def main():
     # 图片归一化，由于采用ImageNet预训练网络，因此这里直接采用ImageNet网络的参数
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     
-    # 训练集图片变换
+    # 训练集图片变换，输入网络的尺寸为384*384
     train_data = TrainDataset(train_data_list,
                               transform=transforms.Compose([
-                                  transforms.Resize((600, 600)),
+                                  transforms.Resize((400, 400)),
                                   transforms.ColorJitter(0.15, 0.15, 0.15, 0.075),
                                   transforms.RandomHorizontalFlip(),
                                   transforms.RandomGrayscale(),
                                   # transforms.RandomRotation(20),
                                   FixedRotation([0, 90, 180, 270]),
-                                  transforms.RandomCrop(584),
+                                  transforms.RandomCrop(384),
                                   transforms.ToTensor(),
                                   normalize,
                               ]))
@@ -384,8 +391,8 @@ def main():
     # 验证集图片变换
     val_data = ValDataset(val_data_list,
                           transform=transforms.Compose([
-                              transforms.Resize((600,600)),
-                              transforms.CenterCrop(584),
+                              transforms.Resize((400, 400)),
+                              transforms.CenterCrop(384),
                               transforms.ToTensor(),
                               normalize,
                           ]))
@@ -393,8 +400,8 @@ def main():
     # 测试集图片变换
     test_data = TestDataset(test_data_list,
                             transform=transforms.Compose([
-                                transforms.Resize((600, 600)),
-                                transforms.CenterCrop(584),
+                                transforms.Resize((400, 400)),
+                                transforms.CenterCrop(384),
                                 transforms.ToTensor(),
                                 normalize,
                             ]))
@@ -480,6 +487,7 @@ def main():
     if evaluate:
         validate(val_loader, model, criterion)
     else:
+        # 开始训练
         for epoch in range(start_epoch, total_epochs):
             # train for one epoch
             train(train_loader, model, criterion, optimizer, epoch)
@@ -521,7 +529,7 @@ def main():
         acc_file.write('%s  * best acc: %.8f  %s\n' % (
         time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())), best_precision, os.path.basename(__file__)))
 
-    # 读取最佳模型，预测测试集
+    # 读取最佳模型，预测测试集，并生成可直接提交的结果文件
     best_model = torch.load('./model/%s/model_best.pth.tar' % file_name)
     model.load_state_dict(best_model['state_dict'])
     test(test_loader=test_loader, model=model)
