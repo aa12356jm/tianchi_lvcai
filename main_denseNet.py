@@ -4,6 +4,7 @@ Created on Thu Sep 20 16:16:39 2018
  
 @ author: herbert-chen
 和baseline相比，这里只是更换了网络模型为densenet，但是无法跑通，具体原因待查。。。
+图像大小必须要改为224才可以跑通，不清楚为什么
 '''
 import os
 import time
@@ -305,7 +306,7 @@ def main():
 
     # GPU ID
     os.environ["CUDA_VISIBLE_DEVICES"] = '0'
-    batch_size = 8
+    batch_size = 2
     workers = 0
 
     # epoch数量，分stage进行，跑完一个stage后降低学习率进入下一个stage
@@ -337,12 +338,19 @@ def main():
     model_ft = models.densenet161(pretrained=True)
     #有时候我们加载了训练模型后，只想调节最后的几层，其他层不训练。其实不训练也就意味着不进行梯度计算，
     # PyTorch中提供的requires_grad使得对训练的控制变得非常简单。
-    for param in model_ft.parameters():
-         param.requires_grad = False
+    #for param in model_ft.parameters():
+         #param.requires_grad = False
 
     num_ftrs = model_ft.classifier.in_features
-    model_ft.avg_pool = nn.AdaptiveAvgPool2d(1)
+    #model_ft.avg_pool = nn.AdaptiveAvgPool2d(1)
     model_ft.classifier = nn.Linear(num_ftrs, 12)
+    # model_ft.classifier = nn.Sequential(
+    #     nn.AdaptiveAvgPool2d(1),
+    #     #nn.BatchNorm1d(num_ftrs),
+    #     #nn.Dropout(0.5),
+    #     nn.Linear(num_ftrs, 12),
+    # )
+
     print(model_ft)
 
     model = torch.nn.DataParallel(model_ft).cuda()
@@ -381,13 +389,13 @@ def main():
     # 训练集图片变换
     train_data = TrainDataset(train_data_list,
                               transform=transforms.Compose([
-                                  transforms.Resize((600, 600)),
+                                  transforms.Resize((256, 256)),
                                   transforms.ColorJitter(0.15, 0.15, 0.15, 0.075),
                                   transforms.RandomHorizontalFlip(),
                                   transforms.RandomGrayscale(),
                                   # transforms.RandomRotation(20),
                                   FixedRotation([0, 90, 180, 270]),
-                                  transforms.RandomCrop(584),
+                                  transforms.RandomCrop(224),
                                   transforms.ToTensor(),
                                   normalize,
                               ]))
@@ -395,8 +403,8 @@ def main():
     # 验证集图片变换
     val_data = ValDataset(val_data_list,
                           transform=transforms.Compose([
-                              transforms.Resize((600, 600)),
-                              transforms.CenterCrop(584),
+                              transforms.Resize((256, 256)),
+                              transforms.CenterCrop(224),
                               transforms.ToTensor(),
                               normalize,
                           ]))
@@ -404,8 +412,8 @@ def main():
     # 测试集图片变换
     test_data = TestDataset(test_data_list,
                             transform=transforms.Compose([
-                                transforms.Resize((600, 600)),
-                                transforms.CenterCrop(584),
+                                transforms.Resize((256, 256)),
+                                transforms.CenterCrop(224),
                                 transforms.ToTensor(),
                                 normalize,
                             ]))
