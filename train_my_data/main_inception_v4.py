@@ -64,7 +64,7 @@ def main():
 
         def __getitem__(self, index):
             filename, label = self.imgs[index]
-            img = self.loader(filename)
+            img = self.loader(filename) #加载图像
             if self.transform is not None:
                 img = self.transform(img)
             return img, label
@@ -117,14 +117,15 @@ def main():
     # 数据增强：在给定角度中随机进行旋转
     class FixedRotation(object):
         def __init__(self, angles):
-            self.angles = angles
+            self.angles = angles #旋转角度list,可以指定多个旋转角度
 
         def __call__(self, img):
-            return fixed_rotate(img, self.angles)
+            return fixed_rotate(img, self.angles) #返回旋转后的图像
 
+	#对图像进行旋转
     def fixed_rotate(img, angles):
-        angles = list(angles)
-        angles_num = len(angles)
+        angles = list(angles)#旋转角度
+        angles_num = len(angles)#旋转几个角度
         index = random.randint(0, angles_num - 1)
         return img.rotate(angles[index])
 
@@ -136,22 +137,22 @@ def main():
         acc = AverageMeter()
 
         # switch to train mode
-        model.train()
+        model.train()#转换为训练模式,训练模式和评估模式model.eval()的区别是在于dropout和batchnorm是否使用
 
         end = time.time()
         # 从训练集迭代器中获取训练数据
-        for i, (images, target) in enumerate(train_loader):
+        for i, (images, target) in enumerate(train_loader):#i为enumerate函数生成的索引
             # 评估图片读取耗时
             data_time.update(time.time() - end)
             # 将图片和标签转化为tensor
-            image_var = torch.tensor(images).cuda(async=True)
-            label = torch.tensor(target).cuda(async=True)
+            image_var = torch.tensor(images).cuda(async=True)#图像转换为tensor,并放在gpu上
+            label = torch.tensor(target).cuda(async=True)#标签转换为tensor,并放在gpu上
 
             # 将图片输入网络，前传，生成预测值
-            y_pred = model(image_var)
+            y_pred = model(image_var)#得到预测值
             # 计算loss
-            loss = criterion(y_pred, label)
-            losses.update(loss.item(), images.size(0))
+            loss = criterion(y_pred, label)#计算预测值和真实值之间的loss
+            losses.update(loss.item(), images.size(0))#记录loss
 
             # 计算top1正确率
             prec, PRED_COUNT = accuracy(y_pred.data, target, topk=(1, 1))
@@ -304,7 +305,73 @@ def main():
         else:
             final_acc = PRED_CORRECT_COUNT / PRED_COUNT
         return final_acc * 100, PRED_COUNT
-    
+
+    from torch.autograd import Variable
+    import torch.nn.functional as F
+
+    class FocalLoss(nn.Module):
+        r"""
+            This criterion is a implemenation of Focal Loss, which is proposed in
+            Focal Loss for Dense Object Detection.
+
+                Loss(x, class) = - \alpha (1-softmax(x)[class])^gamma \log(softmax(x)[class])
+
+            The losses are averaged across observations for each minibatch.
+
+            Args:
+                alpha(1D Tensor, Variable) : the scalar factor for this criterion
+                gamma(float, double) : gamma > 0; reduces the relative loss for well-classiﬁed examples (p > .5),
+                                       putting more focus on hard, misclassiﬁed examples
+                size_average(bool): By default, the losses are averaged over observations for each minibatch.
+                                    However, if the field size_average is set to False, the losses are
+                                    instead summed for each minibatch.
+
+
+        """
+
+        def __init__(self, class_num, alpha=None, gamma=2, size_average=True):
+            super(FocalLoss, self).__init__()
+            if alpha is None:
+                self.alpha = Variable(torch.ones(class_num, 1))
+            else:
+                if isinstance(alpha, Variable):
+                    self.alpha = alpha
+                else:
+                    self.alpha = Variable(alpha)
+            self.gamma = gamma
+            self.class_num = class_num
+            self.size_average = size_average
+
+        def forward(self, inputs, targets):
+            N = inputs.size(0)
+            C = inputs.size(1)
+            P = F.softmax(inputs)
+
+            class_mask = inputs.data.new(N, C).fill_(0)
+            class_mask = Variable(class_mask)
+            ids = targets.view(-1, 1)
+            class_mask.scatter_(1, ids.data, 1.)
+            # print(class_mask)
+
+            if inputs.is_cuda and not self.alpha.is_cuda:
+                self.alpha = self.alpha.cuda()
+            alpha = self.alpha[ids.data.view(-1)]
+
+            probs = (P * class_mask).sum(1).view(-1, 1)
+
+            log_p = probs.log()
+            # print('probs size= {}'.format(probs.size()))
+            # print(probs)
+
+            batch_loss = -alpha * (torch.pow((1 - probs), self.gamma)) * log_p
+            # print('-----bacth_loss------')
+            # print(batch_loss)
+
+            if self.size_average:
+                loss = batch_loss.mean()
+            else:
+                loss = batch_loss.sum()
+            return loss
     # 程序主体
 
     # 设定GPU ID
@@ -415,10 +482,12 @@ def main():
     test_loader = DataLoader(test_data, batch_size=batch_size*2, shuffle=False, pin_memory=False, num_workers=workers)
 
     # 使用交叉熵损失函数
-    criterion = nn.CrossEntropyLoss().cuda()
+    #criterion = nn.CrossEntropyLoss().cuda()
+    criterion = FocalLoss(class_num=12).cuda()
 
     # 优化器，使用带amsgrad的Adam
     optimizer = optim.Adam(model.parameters(), lr, weight_decay=weight_decay, amsgrad=True)
+    #optimizer = optim.SGD(model.parameters(), lr,momentum=0.9,weight_decay=weight_decay)
 
     if evaluate:
         validate(val_loader, model, criterion)
